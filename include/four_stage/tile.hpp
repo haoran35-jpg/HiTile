@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * K-centric tile abstraction + (Src, Dst) specializations.
+ * Single header: K-centric tile abstraction + (Src, Dst) specializations.
  *
  * 1) K forward pass (core): k_pipe_schedule / k_pipe_cursor — which K-tile to load, which ping-pong buffer to write.
  * 2) Tile shape: tile<Mem, Arch, R, C>.
@@ -11,16 +11,16 @@
 
 namespace four_stage {
 
-// ==================
+// =============================================================================
 // Memory / arch tags
-// ==================
+// =============================================================================
 
 enum struct Mem { Reg, Shared, Global };
 enum struct Arch { Hopper };  // Ampere, etc. later
 
-// ==================
+// =============================================================================
 // K forward pass (tile abstraction core: step forward along K)
-// ==================
+// =============================================================================
 
 /**
  * At global step s:
@@ -67,9 +67,9 @@ struct k_pipe_cursor {
   constexpr void reset() noexcept { step = 0; }
 };
 
-// ==================
+// =============================================================================
 // Tile shape (per memory level)
-// ==================
+// =============================================================================
 
 template <Mem M, Arch A, int R, int C>
 struct tile {
@@ -86,9 +86,9 @@ using shared_tile = tile<Mem::Shared, Arch::Hopper, R, C>;
 template <int R, int C>
 using global_tile = tile<Mem::Global, Arch::Hopper, R, C>;
 
-// ==================
+// =============================================================================
 // (Src -> Dst) transfer: abstract core + per-pair specializations
-// ==================
+// =============================================================================
 
 enum class TransferEngine : int {
   None = 0,
@@ -195,9 +195,9 @@ struct tile_algorithm<Mem::Shared, Mem::Shared, Arch::Hopper> {
 template <Mem Src, Mem Dst, Arch A>
 using tile_transfer_traits = tile_algorithm<Src, Dst, A>;
 
-// ==================
+// =============================================================================
 // Bundles
-// ==================
+// =============================================================================
 
 template <Mem Src, Mem Dst, Arch A, int R, int C>
 struct tiled_transfer {
