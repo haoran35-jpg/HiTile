@@ -10,8 +10,14 @@
 
 #include "tile.hpp"
 
-#include <cute/int.hpp>
+#ifdef __CUDACC__
 #include <cute/layout.hpp>
+#include <cute/numeric/integral_constant.hpp>
+#include <cute/pointer.hpp>
+#include <cute/tensor.hpp>
+#endif
+
+#include <type_traits>
 
 namespace four_stage {
 
@@ -50,6 +56,8 @@ struct cute_arch_tag<Arch::Hopper> {};
 // =============================================================================
 // (R, C) → cute::Shape — consistent with 2D tile<Mem, Arch, R, C>
 // =============================================================================
+
+#ifdef __CUDACC__
 
 /**
  * static Shape for 2D tile: `(R, C)`, consistent with `tile<*, *, R, C>::rows/cols`.
@@ -106,11 +114,120 @@ struct cute_tile_traits {
   using four_stage_tile = tile<M, A, R, C>;
   using shape_type = cute_tile_shape<R, C>;
 
+  static constexpr int shape_elems = R * C;
+
   static constexpr shape_type shape() noexcept { return make_cute_tile_shape<R, C>(); }
 
   static constexpr auto layout_default() noexcept {
     return make_cute_tile_layout_default<M, A, R, C>();
   }
 };
+
+// =============================================================================
+// 0.3 tile -> CuTe tensor view (gmem/smem)
+// =============================================================================
+/**
+ * as_cute_tensor:
+ *   - Input: raw pointer + tile dims (R,C) via template params
+ *   - Output: CuTe non-owning Tensor view, ready for `cute::copy`.
+ *
+ * Currently implemented for `Mem::Global` and `Mem::Shared` only.
+ * `Mem::Reg` fragment tensor is expected to be introduced later via MMA/CuTe fragment logic.
+ */
+template <typename Element, Mem M, Arch A, int R, int C>
+constexpr auto as_cute_tensor(Element* ptr) noexcept {
+  static_assert(M != Mem::Reg, "as_cute_tensor for Mem::Reg is not implemented yet");
+  using T = std::remove_const_t<Element>;
+  auto layout = cute_tile_traits<M, A, R, C>::layout_default();
+
+  if constexpr (M == Mem::Global) {
+    return cute::make_tensor(cute::make_gmem_ptr<T>(ptr), layout);
+  } else if constexpr (M == Mem::Shared) {
+    return cute::make_tensor(cute::make_smem_ptr<T>(ptr), layout);
+  }
+
+  static_assert(M == Mem::Global || M == Mem::Shared, "unsupported Mem for as_cute_tensor");
+}
+
+template <typename Element, Mem M, Arch A, int R, int C>
+constexpr auto as_cute_tensor(Element const* ptr) noexcept {
+  return as_cute_tensor<std::remove_const_t<Element>, M, A, R, C>(
+      const_cast<std::remove_const_t<Element>*>(ptr));
+}
+
+template <typename Element, Mem M, Arch A, int R, int C>
+using cute_tensor_t = decltype(as_cute_tensor<Element, M, A, R, C>(static_cast<Element*>(nullptr)));
+
+#else  // !__CUDACC__ : host-only stub
+
+// Minimal host-only stubs so `#include <four_stage/cute_mapping.hpp>` works without CUDA.
+template <int R, int C>
+struct cute_tile_shape {
+  static constexpr int rows = R;
+  static constexpr int cols = C;
+  static constexpr int size = R * C;
+};
+
+template <int R, int C>
+constexpr cute_tile_shape<R, C> make_cute_tile_shape() noexcept {
+  return {};
+}
+
+template <int R, int C>
+struct cute_layout_dummy {};
+
+template <int R, int C>
+constexpr auto make_cute_layout_row_major() noexcept {
+  return cute_layout_dummy<R, C>{};
+}
+
+template <int R, int C>
+constexpr auto make_cute_layout_col_major() noexcept {
+  return cute_layout_dummy<R, C>{};
+}
+
+template <Mem M, Arch A, int R, int C>
+constexpr auto make_cute_tile_layout_default() noexcept {
+  (void)M;
+  (void)A;
+  return cute_layout_dummy<R, C>{};
+}
+
+template <Mem M, Arch A, int R, int C>
+struct cute_tile_traits {
+  using four_stage_tile = tile<M, A, R, C>;
+  using shape_type = cute_tile_shape<R, C>;
+
+  static constexpr int shape_elems = R * C;
+
+  static constexpr shape_type shape() noexcept { return make_cute_tile_shape<R, C>(); }
+
+  static constexpr auto layout_default() noexcept {
+    return make_cute_tile_layout_default<M, A, R, C>();
+  }
+};
+
+struct cute_tensor_stub {};
+
+template <typename Element, Mem M, Arch A, int R, int C>
+constexpr cute_tensor_stub as_cute_tensor(Element*) noexcept {
+  (void)sizeof(Element);
+  (void)M;
+  (void)A;
+  (void)R;
+  (void)C;
+  static_assert(sizeof(Element) == 0, "as_cute_tensor requires CUDA compilation (__CUDACC__).");
+  return {};
+}
+
+template <typename Element, Mem M, Arch A, int R, int C>
+constexpr cute_tensor_stub as_cute_tensor(Element const* ptr) noexcept {
+  return as_cute_tensor<Element, M, A, R, C>(const_cast<Element*>(ptr));
+}
+
+template <typename Element, Mem M, Arch A, int R, int C>
+using cute_tensor_t = cute_tensor_stub;
+
+#endif  // __CUDACC__
 
 }  // namespace four_stage
