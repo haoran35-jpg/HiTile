@@ -4,3 +4,4 @@
 #include "assign.hpp"
 #include "swizzle.hpp"
 #include "pipeline.hpp"
+#include "copy.hpp"
